@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Disaster Tracker</title>
+    <style>
+        body { font-family: Arial; max-width: 1200px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .card { background: white; padding: 20px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, button { padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; cursor: pointer; border: none; }
+        button:hover { background: #0056b3; }
+        .event { padding: 10px; margin: 10px 0; border-left: 4px solid #007bff; background: #f9f9f9; }
+        .high { border-left-color: #dc3545; }
+        .medium { border-left-color: #ffc107; }
+        .status { padding: 10px; background: #d1ecf1; border-radius: 4px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🌍 Disaster Tracker</h1>
+    
+    <div class="card">
+        <h2>Перевірити локацію</h2>
+        <input type="number" id="lat" placeholder="Широта" value="50.4501" step="0.0001">
+        <input type="number" id="lon" placeholder="Довгота" value="30.5234" step="0.0001">
+        <input type="number" id="radius" placeholder="Радіус (км)" value="500">
+        <button onclick="checkLocation()">Перевірити</button>
+    </div>
+
+    <div class="card">
+        <h2>Перевірити дати</h2>
+        <input type="date" id="startDate">
+        <input type="date" id="endDate">
+        <button onclick="checkDates()">Перевірити</button>
+    </div>
+
+    <div class="card">
+        <h2>Гарячі точки</h2>
+        <button onclick="loadHotspots()">Показати найнебезпечніші місця</button>
+    </div>
+
+    <div class="card">
+        <div id="status" class="status">Натисніть кнопку для перевірки</div>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000';
+
+        async function checkLocation() {
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+            const radius = document.getElementById('radius').value;
+            
+            document.getElementById('status').textContent = 'Завантаження...';
+            
+            try {
+                const res = await fetch(`${API}/disasters/events/by-location?lat=${lat}&lon=${lon}&radius_km=${radius}`);
+                const data = await res.json();
+                showResults(data.events);
+                document.getElementById('status').textContent = `Знайдено ${data.count} подій`;
+            } catch (e) {
+                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+            }
+        }
+
+        async function checkDates() {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            
+            if (!start) {
+                alert('Виберіть дату');
+                return;
+            }
+            
+            document.getElementById('status').textContent = 'Завантаження...';
+            
+            try {
+                let url = `${API}/disasters/events/by-date?start_date=${start}`;
+                if (end) url += `&end_date=${end}`;
+                
+                const res = await fetch(url);
+                const data = await res.json();
+                showResults(data.events);
+                document.getElementById('status').textContent = `Знайдено ${data.count} подій`;
+            } catch (e) {
+                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+            }
+        }
+
+        async function loadHotspots() {
+            document.getElementById('status').textContent = 'Завантаження...';
+            
+            try {
+                const res = await fetch(`${API}/disasters/hotspots?limit=10`);
+                const data = await res.json();
+                
+                const html = data.hotspots.map(h => `
+                    <div class="event">
+                        <strong>📍 ${h.location}</strong><br>
+                        Кількість подій: ${h.count}
+                    </div>
+                `).join('');
+                
+                document.getElementById('results').innerHTML = html;
+                document.getElementById('status').textContent = 'Топ-10 гарячих точок';
+            } catch (e) {
+                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+            }
+        }
+
+        function showResults(events) {
+            if (!events || events.length === 0) {
+                document.getElementById('results').innerHTML = '<p>Немає катастроф ✅</p>';
+                return;
+            }
+            
+            const html = events.map(e => {
+                const level = e.warning_level || '';
+                const cls = level === 'HIGH' ? 'high' : level === 'MEDIUM' ? 'medium' : '';
+                
+                return `
+                    <div class="event ${cls}">
+                        <strong>${e.title || 'Подія'}</strong>
+                        ${e.distance_km ? `<br>Відстань: ${e.distance_km} км` : ''}
+                        ${e.warning_level ? `<br>Рівень: ${e.warning_level}` : ''}
+                        ${e.categories ? `<br>Тип: ${e.categories.map(c => c.title).join(', ')}` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('results').innerHTML = html;
+        }
+
+        // Встановити дати за замовчуванням
+        window.onload = () => {
+            const today = new Date().toISOString().split('T')[0];
+            const month = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0];
+            document.getElementById('startDate').value = today;
+            document.getElementById('endDate').value = month;
+        };
+    </script>
+</body>
+</html>

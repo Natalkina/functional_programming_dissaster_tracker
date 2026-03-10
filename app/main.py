@@ -1,20 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.api import auth, disasters, calendar
+import os
 
-app = FastAPI(
-    title="Disaster Tracker API",
-    description="Real-time disaster tracking and calendar integration",
-    version="1.0.0"
-)
+app = FastAPI(title="Disaster Tracker")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+static_path = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_path):
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 app.include_router(auth.router)
 app.include_router(disasters.router)
@@ -22,19 +24,10 @@ app.include_router(calendar.router)
 
 @app.get("/")
 async def root():
-    return {
-        "message": "Disaster Tracker API",
-        "docs": "/docs",
-        "endpoints": {
-            "auth": "/auth",
-            "disasters": "/disasters",
-            "calendar": "/calendar"
-        }
-    }
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+    index_path = os.path.join(static_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Disaster Tracker API", "docs": "/docs"}
 
 if __name__ == "__main__":
     import uvicorn
