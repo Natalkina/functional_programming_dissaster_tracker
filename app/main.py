@@ -3,7 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import auth, disasters, calendar
+from app.core.database import engine
+from app.models import Base
 import os
+
+# Створити таблиці
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Disaster Tracker")
 

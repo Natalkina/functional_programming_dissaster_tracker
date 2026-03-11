@@ -4,8 +4,29 @@
 
 ## Запуск
 
+### З Docker Compose (рекомендовано)
+
 ```bash
+docker-compose up --build
+```
+
+### Локально
+
+```bash
+# Встановити залежності
 pip install -r requirements.txt
+
+# Створити .env файл
+cp .env.example .env
+
+# Запустити PostgreSQL (або використати Docker)
+docker run -d -p 5432:5432 \
+  -e POSTGRES_USER=disaster_user \
+  -e POSTGRES_PASSWORD=disaster_pass \
+  -e POSTGRES_DB=disaster_tracker \
+  postgres:15-alpine
+
+# Запустити додаток
 python3 -m uvicorn app.main:app --reload
 ```
 
