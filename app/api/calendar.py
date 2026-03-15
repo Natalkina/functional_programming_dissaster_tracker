@@ -11,7 +11,154 @@ from app.services import nasa_client
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
+# ── Google OAuth + Calendar events (functional pipeline) ─────────────
+from app.core.config import settings
+from app.api.calendar_oauth import (
+    make_oauth_state,
+    validate_oauth_state,
+    build_google_oauth_url,
+    exchange_code_for_tokens,
+    refresh_access_token,
+    is_access_token_expired,
+    post_form_httpx,
+)
+from app.services.google_calendar_api import (
+    fetch_calendar_events_raw,
+    process_calendar_body,
+    extract_items_and_sync_token,
+)
+from app.repositories.token_repo import (
+    save_user_tokens,
+    get_user_tokens,
+)
+from app.services.fp_core import Ok, Err
+import httpx
+from fastapi.responses import RedirectResponse
+
+
+# ── Pure: split scopes string into list ──────────────────────────────
+_parse_scopes = lambda s: s.split()
+
+
+# ── IO boundary: httpx GET returning dict ────────────────────────────
+async def _http_get_json(url: str, headers: dict[str, str]) -> dict:
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
+
 router = APIRouter(prefix="/calendar", tags=["calendar"])
+
+@router.get("/google/oauth/login")
+async def google_oauth_login(user_id: str = Query("anonymous")):
+    """
+    Redirect the browser to Google's consent screen.
+    """
+    state = make_oauth_state(user_id, settings.OAUTH_STATE_SECRET)
+    scopes = _parse_scopes(settings.GOOGLE_SCOPES)
+    url = build_google_oauth_url(
+        client_id=settings.GOOGLE_CLIENT_ID,
+        redirect_uri=settings.GOOGLE_REDIRECT_URI,
+        state=state,
+        scopes=scopes,
+    )
+    return RedirectResponse(url)
+@router.get("/google/oauth/callback")
+async def google_oauth_callback(code: str = Query(...), state: str = Query(...)):
+    """
+    Google redirects here after user consent.
+    Exchange code → tokens, store them, redirect to UI.
+    """
+    # 1. Validate state (CSRF)
+    validation = validate_oauth_state(state, settings.OAUTH_STATE_SECRET)
+    if not validation["ok"]:
+        raise HTTPException(400, f"Invalid OAuth state: {validation['reason']}")
+
+    user_id = validation["user_id"]
+
+    # 2. Exchange code for tokens (IO boundary)
+    try:
+        tokens = await exchange_code_for_tokens(
+            http_post_form=post_form_httpx,
+            code=code,
+            client_id=settings.GOOGLE_CLIENT_ID,
+            client_secret=settings.GOOGLE_CLIENT_SECRET,
+            redirect_uri=settings.GOOGLE_REDIRECT_URI,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Token exchange failed: {exc}")
+
+    # 3. Store tokens (mutable boundary, isolated in repo)
+    result = save_user_tokens(user_id, tokens)
+    if isinstance(result, Err):
+        raise HTTPException(500, result.error)
+
+    # 4. Redirect back to frontend with success indicator
+    return RedirectResponse(f"/?google_auth=ok&user_id={user_id}")
+
+
+@router.get("/google/events")
+async def get_google_calendar_events(
+    user_id: str = Query("anonymous"),
+    time_min: str = Query(None, description="ISO date, e.g. 2026-03-15"),
+    time_max: str = Query(None, description="ISO date, e.g. 2026-04-15"),
+):
+    """
+    Fetch Google Calendar events for an authenticated user.
+    Functional pipeline: get tokens → refresh if expired → fetch → process.
+    """
+    # 1. Retrieve stored tokens
+    token_result = get_user_tokens(user_id)
+    if isinstance(token_result, Err):
+        raise HTTPException(401, f"Not authenticated: {token_result.error}. Please connect Google Calendar first.")
+
+    tokens = token_result.value
+
+    # 2. Refresh if expired (IO boundary)
+    if is_access_token_expired(tokens):
+        refresh_tok = tokens.get("refresh_token")
+        if not refresh_tok:
+            raise HTTPException(401, "Access token expired and no refresh token available. Re-authenticate.")
+        try:
+            tokens = await refresh_access_token(
+                http_post_form=post_form_httpx,
+                refresh_token=refresh_tok,
+                client_id=settings.GOOGLE_CLIENT_ID,
+                client_secret=settings.GOOGLE_CLIENT_SECRET,
+            )
+            save_user_tokens(user_id, tokens)
+        except Exception as exc:
+            raise HTTPException(502, f"Token refresh failed: {exc}")
+
+    # Pure: convert date strings to RFC 3339 for Google API
+    time_min_iso = f"{time_min}T00:00:00Z" if time_min else None
+    time_max_iso = f"{time_max}T23:59:59Z" if time_max else None
+
+    # 3. Fetch raw calendar data (IO boundary)
+    raw_result = await fetch_calendar_events_raw(
+        http_get=_http_get_json,
+        access_token=tokens["access_token"],
+        time_min_iso=time_min_iso,
+        time_max_iso=time_max_iso,
+    )
+
+    if isinstance(raw_result, Err):
+        raise HTTPException(502, raw_result.error)
+
+    # 4. Pure pipeline: raw body → normalized events with location
+    events = process_calendar_body(raw_result.value)
+
+    return {"events": events, "count": len(events), "user_id": user_id}
+
+
+
+@router.get("/google/status")
+async def google_auth_status(user_id: str = Query("anonymous")):
+    """Check whether a user has connected Google Calendar."""
+    token_result = get_user_tokens(user_id)
+    connected = isinstance(token_result, Ok)
+    return {"connected": connected, "user_id": user_id}
 
 class CalendarEventCreate(BaseModel):
     title: str
