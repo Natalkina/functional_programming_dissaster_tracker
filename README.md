@@ -30,7 +30,7 @@ docker run -d -p 5432:5432 \
 python3 -m uvicorn app.main:app --reload
 ```
 
-Відкрити: http://localhost:8000
+Відкрити: `http://localhost:8000`
 
 ## Функціонал
 
