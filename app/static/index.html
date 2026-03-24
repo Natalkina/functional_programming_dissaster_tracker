@@ -10,15 +10,47 @@
         input, button { padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
         button { background: #007bff; color: white; cursor: pointer; border: none; }
         button:hover { background: #0056b3; }
+        button.google-btn { background: #4285F4; }
+        button.google-btn:hover { background: #3367D6; }
+        button.google-btn.connected { background: #34a853; }
+        button.danger-btn { background: #dc3545; }
+        button.danger-btn:hover { background: #a71d2a; }
         .event { padding: 10px; margin: 10px 0; border-left: 4px solid #007bff; background: #f9f9f9; }
         .high { border-left-color: #dc3545; }
         .medium { border-left-color: #ffc107; }
+        .gcal { border-left-color: #4285F4; }
         .status { padding: 10px; background: #d1ecf1; border-radius: 4px; margin: 10px 0; }
+        .auth-status { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; }
+        .auth-status.connected { background: #d4edda; color: #155724; }
+        .auth-status.disconnected { background: #f8d7da; color: #721c24; }
+        .section-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
     <h1>🌍 Disaster Tracker</h1>
-    
+
+    <!-- ── Google Calendar ─────────────────────────────────── -->
+    <div class="card">
+        <div class="section-row">
+            <h2 style="margin:0">📅 Google Calendar</h2>
+            <span id="authBadge" class="auth-status disconnected">not connected</span>
+        </div>
+        <p>
+            <label>User ID:
+                <input type="text" id="userId" value="anonymous" style="width:160px">
+            </label>
+        </p>
+        <p>
+            <label>From: <input type="date" id="calFrom"></label>
+            <label>To: <input type="date" id="calTo"></label>
+        </p>
+        <button class="google-btn" id="connectBtn" onclick="connectGoogle()">🔗 Connect Google Calendar</button>
+        <button class="google-btn" id="loadEventsBtn" onclick="loadGoogleEvents()" disabled>📅 Load Calendar Events</button>
+        <button class="danger-btn" id="checkCalDisasters" onclick="checkCalendarDisasters()" disabled>⚠️ Check Disasters for Events</button>
+        <div id="calendarResults"></div>
+    </div>
+
+    <!-- ── Location check ──────────────────────────────────── -->
     <div class="card">
         <h2>Перевірити локацію</h2>
         <input type="number" id="lat" placeholder="Широта" value="50.4501" step="0.0001">
@@ -27,6 +59,7 @@
         <button onclick="checkLocation()">Перевірити</button>
     </div>
 
+    <!-- ── Date check ──────────────────────────────────────── -->
     <div class="card">
         <h2>Перевірити дати</h2>
         <input type="date" id="startDate">
@@ -34,11 +67,13 @@
         <button onclick="checkDates()">Перевірити</button>
     </div>
 
+    <!-- ── Hotspots ────────────────────────────────────────── -->
     <div class="card">
         <h2>Гарячі точки</h2>
         <button onclick="loadHotspots()">Показати найнебезпечніші місця</button>
     </div>
 
+    <!-- ── Results ─────────────────────────────────────────── -->
     <div class="card">
         <div id="status" class="status">Натисніть кнопку для перевірки</div>
         <div id="results"></div>
@@ -47,65 +82,200 @@
     <script>
         const API = 'http://localhost:8000';
 
+        // ── helpers ───────────────────────────────────────────
+        function getUserId() {
+            return document.getElementById('userId').value.trim() || 'anonymous';
+        }
+
+        function setStatus(msg) {
+            document.getElementById('status').textContent = msg;
+        }
+
+        function buildGoogleEventsUrl() {
+            const uid  = getUserId();
+            const from = document.getElementById('calFrom').value;
+            const to   = document.getElementById('calTo').value;
+
+            let url = `${API}/calendar/google/events?user_id=${encodeURIComponent(uid)}`;
+            if (from) url += `&time_min=${from}`;
+            if (to)   url += `&time_max=${to}`;
+            return url;
+        }
+
+        // ── Google Calendar auth ──────────────────────────────
+        function connectGoogle() {
+            const uid = getUserId();
+            window.location.href = `${API}/calendar/google/oauth/login?user_id=${encodeURIComponent(uid)}`;
+        }
+
+        async function checkAuthStatus() {
+            const uid = getUserId();
+            try {
+                const res = await fetch(`${API}/calendar/google/status?user_id=${encodeURIComponent(uid)}`);
+                const data = await res.json();
+                const badge    = document.getElementById('authBadge');
+                const loadBtn  = document.getElementById('loadEventsBtn');
+                const checkBtn = document.getElementById('checkCalDisasters');
+
+                if (data.connected) {
+                    badge.textContent = '✅ connected';
+                    badge.className = 'auth-status connected';
+                    loadBtn.disabled  = false;
+                    checkBtn.disabled = false;
+                } else {
+                    badge.textContent = '❌ not connected';
+                    badge.className = 'auth-status disconnected';
+                    loadBtn.disabled  = true;
+                    checkBtn.disabled = true;
+                }
+            } catch (e) {
+                console.error('Auth status check failed', e);
+            }
+        }
+
+        // ── Load Google Calendar events ───────────────────────
+        async function loadGoogleEvents() {
+            setStatus('Завантаження подій з Google Calendar...');
+            document.getElementById('calendarResults').innerHTML = '';
+
+            try {
+                const res = await fetch(buildGoogleEventsUrl());
+                if (!res.ok) {
+                    const err = await res.json();
+                    setStatus('Помилка: ' + (err.detail || res.statusText));
+                    return;
+                }
+                const data = await res.json();
+
+                if (!data.events || data.events.length === 0) {
+                    document.getElementById('calendarResults').innerHTML = '<p>Немає подій з локацією у календарі</p>';
+                    setStatus('Подій з локацією не знайдено');
+                    return;
+                }
+
+                const html = data.events.map(e => `
+                    <div class="event gcal">
+                        <strong>📅 ${e.title}</strong>
+                        ${e.location ? `<br>📍 ${e.location}` : ''}
+                        <br>🕐 ${e.start_date || ''}${e.end_date ? ' → ' + e.end_date : ''}
+                        ${e.html_link ? `<br><a href="${e.html_link}" target="_blank">відкрити в Google</a>` : ''}
+                    </div>
+                `).join('');
+
+                document.getElementById('calendarResults').innerHTML = html;
+                setStatus(`Знайдено ${data.count} подій з локацією`);
+            } catch (e) {
+                setStatus('Помилка: ' + e.message);
+            }
+        }
+
+        // ── Check disasters for calendar events ───────────────
+        async function checkCalendarDisasters() {
+            setStatus('Перевірка катастроф для подій календаря...');
+            document.getElementById('calendarResults').innerHTML = '';
+
+            try {
+                const evRes = await fetch(buildGoogleEventsUrl());
+                if (!evRes.ok) {
+                    const err = await evRes.json();
+                    setStatus('Помилка: ' + (err.detail || evRes.statusText));
+                    return;
+                }
+                const evData = await evRes.json();
+
+                if (!evData.events || evData.events.length === 0) {
+                    setStatus('Немає подій з локацією — нічого перевіряти');
+                    return;
+                }
+
+                let allWarnings = [];
+                for (const ev of evData.events) {
+                    try {
+                        const loc = encodeURIComponent(ev.location);
+                        const wRes = await fetch(`${API}/calendar/hotspot-warnings?location=${loc}`);
+                        if (wRes.ok) {
+                            const w = await wRes.json();
+                            if (w.warning) {
+                                allWarnings.push({ event: ev, warning: w });
+                            }
+                        }
+                    } catch (_) { /* skip */ }
+                }
+
+                if (allWarnings.length === 0) {
+                    document.getElementById('calendarResults').innerHTML =
+                        '<div class="event" style="border-left-color:#34a853"><strong>✅ Всі заплановані місця виглядають безпечно!</strong></div>';
+                    setStatus('Безпечно! Катастроф не знайдено');
+                    return;
+                }
+
+                const html = allWarnings.map(w => `
+                    <div class="event high">
+                        <strong>⚠️ ${w.event.title}</strong>
+                        <br>📍 ${w.event.location}
+                        <br>${w.warning.message}
+                        <br>Відстань до небезпеки: ${w.warning.distance_km} км
+                        <br>💡 ${w.warning.recommendation}
+                    </div>
+                `).join('');
+
+                document.getElementById('calendarResults').innerHTML = html;
+                setStatus(`⚠️ Знайдено ${allWarnings.length} попереджень!`);
+            } catch (e) {
+                setStatus('Помилка: ' + e.message);
+            }
+        }
+
+        // ── Existing disaster features ────────────────────────
         async function checkLocation() {
             const lat = document.getElementById('lat').value;
             const lon = document.getElementById('lon').value;
             const radius = document.getElementById('radius').value;
-            
-            document.getElementById('status').textContent = 'Завантаження...';
-            
+
+            setStatus('Завантаження...');
             try {
                 const res = await fetch(`${API}/disasters/events/by-location?lat=${lat}&lon=${lon}&radius_km=${radius}`);
                 const data = await res.json();
                 showResults(data.events);
-                document.getElementById('status').textContent = `Знайдено ${data.count} подій`;
+                setStatus(`Знайдено ${data.count} подій`);
             } catch (e) {
-                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+                setStatus('Помилка: ' + e.message);
             }
         }
 
         async function checkDates() {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
-            
-            if (!start) {
-                alert('Виберіть дату');
-                return;
-            }
-            
-            document.getElementById('status').textContent = 'Завантаження...';
-            
+            if (!start) { alert('Виберіть дату'); return; }
+
+            setStatus('Завантаження...');
             try {
                 let url = `${API}/disasters/events/by-date?start_date=${start}`;
                 if (end) url += `&end_date=${end}`;
-                
                 const res = await fetch(url);
                 const data = await res.json();
                 showResults(data.events);
-                document.getElementById('status').textContent = `Знайдено ${data.count} подій`;
+                setStatus(`Знайдено ${data.count} подій`);
             } catch (e) {
-                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+                setStatus('Помилка: ' + e.message);
             }
         }
 
         async function loadHotspots() {
-            document.getElementById('status').textContent = 'Завантаження...';
-            
+            setStatus('Завантаження...');
             try {
                 const res = await fetch(`${API}/disasters/hotspots?limit=10`);
                 const data = await res.json();
-                
                 const html = data.hotspots.map(h => `
                     <div class="event">
                         <strong>📍 ${h.location}</strong><br>
                         Кількість подій: ${h.count}
                     </div>
                 `).join('');
-                
                 document.getElementById('results').innerHTML = html;
-                document.getElementById('status').textContent = 'Топ-10 гарячих точок';
+                setStatus('Топ-10 гарячих точок');
             } catch (e) {
-                document.getElementById('status').textContent = 'Помилка: ' + e.message;
+                setStatus('Помилка: ' + e.message);
             }
         }
 
@@ -114,11 +284,9 @@
                 document.getElementById('results').innerHTML = '<p>Немає катастроф ✅</p>';
                 return;
             }
-            
             const html = events.map(e => {
                 const level = e.warning_level || '';
                 const cls = level === 'HIGH' ? 'high' : level === 'MEDIUM' ? 'medium' : '';
-                
                 return `
                     <div class="event ${cls}">
                         <strong>${e.title || 'Подія'}</strong>
@@ -128,17 +296,31 @@
                     </div>
                 `;
             }).join('');
-            
             document.getElementById('results').innerHTML = html;
         }
 
-        // Встановити дати за замовчуванням
+        // ── Init ──────────────────────────────────────────────
         window.onload = () => {
             const today = new Date().toISOString().split('T')[0];
             const month = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0];
             document.getElementById('startDate').value = today;
-            document.getElementById('endDate').value = month;
+            document.getElementById('endDate').value   = month;
+            document.getElementById('calFrom').value   = today;
+            document.getElementById('calTo').value     = month;
+
+            // If redirected back from Google OAuth, detect it
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('google_auth') === 'ok') {
+                const uid = params.get('user_id') || 'anonymous';
+                document.getElementById('userId').value = uid;
+                window.history.replaceState({}, '', '/');
+            }
+
+            checkAuthStatus();
         };
+
+        // Re-check auth when user changes userId
+        document.getElementById('userId')?.addEventListener('change', checkAuthStatus);
     </script>
 </body>
 </html>
