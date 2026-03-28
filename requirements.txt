@@ -10,3 +10,4 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 alembic==1.12.1
 apscheduler==3.11.2
+reverse_geocode==1.6.5

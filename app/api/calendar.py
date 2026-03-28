@@ -4,12 +4,11 @@ from typing import List
 from functools import reduce
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models import CalendarEvent, User
+from app.models import CalendarEvent
 from app.services.calendar_service import get_disaster_warnings_for_events
-from app.services.functional_streams import calculate_hotspots
+from app.services.functional_streams import calculate_hotspots, get_city, calculate_distance
 from app.services import nasa_client
 from geopy.geocoders import Nominatim
-from geopy.distance import geodesic
 
 # ── Google OAuth + Calendar events (functional pipeline) ─────────────
 from app.core.config import settings
@@ -225,28 +224,36 @@ async def send_warnings(user_id: int, start_date: str, end_date: str = None, db:
 @router.get("/hotspot-warnings")
 async def check_hotspot_warnings(location: str):
     events = await nasa_client.fetch_nasa_events()
-    hotspots = await calculate_hotspots(events, grid_size=5.0)
-    
+    hotspots = calculate_hotspots(events, grid_size=1.0)
+
     geolocator = Nominatim(user_agent="disaster_tracker")
     geo = geolocator.geocode(location)
-    
+
     if not geo:
         raise HTTPException(400, "Location not found")
 
-    for hotspot in hotspots[:20]:
-        distance = geodesic((geo.latitude, geo.longitude), (hotspot["lat"], hotspot["lon"])).km
-        
-        if distance < 200:
-            return {
-                "warning": True,
-                "message": f"⚠️ УВАГА! {location} знаходиться в небезпечній зоні!",
-                "hotspot": hotspot,
-                "distance_km": round(distance, 2),
-                "recommendation": "Це місце може бути небезпечним. Розгляньте інший напрямок подорожі."
-            }
-    
+    user_point = (geo.latitude, geo.longitude)
+
+    nearby = next(
+        (
+            {"hotspot": h, "distance_km": round(calculate_distance(user_point, (h["lat"], h["lon"])), 2)}
+            for h in hotspots[:20]
+            if calculate_distance(user_point, (h["lat"], h["lon"])) < 200
+        ),
+        None,
+    )
+
+    if nearby:
+        return {
+            "warning": True,
+            "message": f"⚠️ УВАГА! {location} знаходиться в небезпечній зоні!",
+            "hotspot": nearby["hotspot"],
+            "distance_km": nearby["distance_km"],
+            "recommendation": "Це місце може бути небезпечним. Розгляньте інший напрямок подорожі.",
+        }
+
     return {
         "warning": False,
         "message": f"✅ {location} виглядає безпечно",
-        "recommendation": "Приємної подорожі!"
+        "recommendation": "Приємної подорожі!",
     }

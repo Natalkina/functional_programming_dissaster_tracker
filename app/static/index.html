@@ -262,40 +262,54 @@
         }
 
         async function loadHotspots() {
-            setStatus('Завантаження...');
+            setStatus('Завантаження гарячих точок...');
             try {
                 const res = await fetch(`${API}/disasters/hotspots?limit=10`);
                 const data = await res.json();
+
+                if (!data.hotspots) {
+                    setStatus('Помилка: ' + (data.detail || 'невідома помилка'));
+                    return;
+                }
                 const html = data.hotspots.map(h => `
-                    <div class="event">
-                        <strong>📍 ${h.location}</strong><br>
-                        Кількість подій: ${h.count}
+                    <div class="event hotspot">
+                        <div class="hotspot-header">
+                            <span class="city-name">🏙️ ${h.city || 'Невідома локація'}, ${h.country || ''}</span>
+                            <span class="event-count">${h.count} подій</span>
+                        </div>
+                        <small class="coordinates">📍 Координати: ${h.lat.toFixed(2)}, ${h.lon.toFixed(2)}</small>
                     </div>
                 `).join('');
-                document.getElementById('results').innerHTML = html;
-                setStatus('Топ-10 гарячих точок');
+
+                document.getElementById('results').innerHTML = html || '<p>Дані про гарячі точки відсутні</p>';
+                setStatus('Топ-10 найнебезпечніших зон');
             } catch (e) {
-                setStatus('Помилка: ' + e.message);
+                setStatus('Помилка завантаження хотспотів: ' + e.message);
             }
         }
 
         function showResults(events) {
             if (!events || events.length === 0) {
-                document.getElementById('results').innerHTML = '<p>Немає катастроф ✅</p>';
+                document.getElementById('results').innerHTML = '<p>У вашому радіусі катастроф не виявлено ✅</p>';
                 return;
             }
+
             const html = events.map(e => {
-                const level = e.warning_level || '';
-                const cls = level === 'HIGH' ? 'high' : level === 'MEDIUM' ? 'medium' : '';
+                const level = e.warning_level || 'LOW';
+                const cls = level.toLowerCase(); // 'high', 'medium', 'low'
+
                 return `
                     <div class="event ${cls}">
-                        <strong>${e.title || 'Подія'}</strong>
-                        ${e.distance_km ? `<br>Відстань: ${e.distance_km} км` : ''}
-                        ${e.warning_level ? `<br>Рівень: ${e.warning_level}` : ''}
-                        ${e.categories ? `<br>Тип: ${e.categories.map(c => c.title).join(', ')}` : ''}
+                        <strong>🔥 ${e.title || 'Природне явище'}</strong>
+                        <div class="details">
+                            <span>📏 Відстань: <b>${e.distance_km} км</b></span>
+                            <span>⚠️ Рівень: <b class="level-tag">${level}</b></span>
+                        </div>
+                        ${e.categories ? `<small>📁 Тип: ${e.categories.map(c => c.title).join(', ')}</small>` : ''}
                     </div>
                 `;
             }).join('');
+
             document.getElementById('results').innerHTML = html;
         }
 
