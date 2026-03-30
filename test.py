@@ -14,9 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar, Union
 
-
-# we should NOT use Any, coz we'll lose parametric polymorphism entirely; I.e.
-# the type checker will not help us 
 T = TypeVar("T")
 E = TypeVar("E")
 U = TypeVar("U")
@@ -26,13 +23,12 @@ F = TypeVar("F")
 @dataclass(frozen=True, slots=True)
 class Ok(Generic[T]):
     """
-    Degenerate product ADT: value AND Nothing (or None, what do you prefer)
+    Product ADT: value AND Nothing (or None, what do you prefer)
     success branch — carries the computed value
     """
     value: T
 
     # lift a function over the success value, short-circuit on Err
-    # i.e. it "cuts the wire" as soon as the result is determined skipping the Err logic
     def map(self, f: Callable[[T], U]) -> Ok[U]:
         return Ok(f(self.value))
 
@@ -68,3 +64,8 @@ class Err(Generic[E]):
 
 
 Result = Union[Ok[T], Err[E]] # ADT sum type, either Ok or Err
+
+
+if __name__ == "__main__":
+    print(Ok(10.2))
+    print(Err(None))

@@ -1,11 +1,14 @@
 """
-opaque domain types — frozen, slotted dataclasses.
+opaque domain types — is represented as frozen, slotted dataclass
 
 consumers interact through typed accessors, never through
-raw dict keys. internal dict is wrapped in MappingProxyType
+raw dict keys. Internal dict is wrapped in MappingProxyType
 to guarantee true immutability (frozen only prevents field
 reassignment, not mutation of mutable containers inside).
-serialization happens at the io boundary via to_dict().
+serialization happens at the io boundary via to_dict()
+
+I personally don't like these commentaries at the top, yet, they are not suitable
+for any of the dataclass docstring;
 """
 from __future__ import annotations
 
