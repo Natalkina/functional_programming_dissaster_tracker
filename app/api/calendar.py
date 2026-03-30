@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
-from typing import List
 from functools import reduce
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import CalendarEvent
 from app.services.calendar_service import get_disaster_warnings_for_events
-from app.services.functional_streams import calculate_hotspots, get_city, calculate_distance
+from app.services.domain import Coord
+from app.services.functional_streams import calculate_hotspots, calculate_distance
 from app.services import nasa_client
 from geopy.geocoders import Nominatim
 
@@ -24,7 +24,6 @@ from app.api.calendar_oauth import (
 from app.services.google_calendar_api import (
     fetch_calendar_events_raw,
     process_calendar_body,
-    extract_items_and_sync_token,
 )
 from app.repositories.token_repo import (
     save_user_tokens,
@@ -35,8 +34,8 @@ import httpx
 from fastapi.responses import RedirectResponse
 
 
-# ── Pure: split scopes string into list ──────────────────────────────
-_parse_scopes = lambda s: s.split()
+# pure: split scopes string into immutable sequence
+_parse_scopes: callable = lambda s: tuple(s.split())
 
 
 # ── IO boundary: httpx GET returning dict ────────────────────────────
@@ -145,10 +144,10 @@ async def get_google_calendar_events(
     if isinstance(raw_result, Err):
         raise HTTPException(502, raw_result.error)
 
-    # 4. Pure pipeline: raw body → normalized events with location
+    # 4. Pure pipeline: raw body → normalized CalendarEvents with location
     events = process_calendar_body(raw_result.value)
 
-    return {"events": events, "count": len(events), "user_id": user_id}
+    return {"events": [e.to_dict() for e in events], "count": len(events), "user_id": user_id}
 
 
 
@@ -192,12 +191,12 @@ async def get_events(user_id: int = Query(...), date: str = Query(None), db: Ses
     if date:
         query = query.filter(CalendarEvent.date == date)
     events = query.all()
-    return {"events": [{"id": e.id, "title": e.title, "location": e.location, "date": e.date} for e in events], "count": len(events)}
+    return {"events": tuple({"id": e.id, "title": e.title, "location": e.location, "date": e.date} for e in events), "count": len(events)}
 
-@router.get("/check-disasters", response_model=List[DisasterWarning])
+@router.get("/check-disasters", response_model=list[DisasterWarning])
 async def check_disasters_for_events(user_id: int, start_date: str, end_date: str = None, db: Session = Depends(get_db)):
     events = db.query(CalendarEvent).filter(CalendarEvent.user_id == user_id).all()
-    user_events = [{"title": e.title, "location": e.location, "date": e.date} for e in events]
+    user_events = tuple({"title": e.title, "location": e.location, "date": e.date} for e in events)
     warnings = await get_disaster_warnings_for_events(user_events, start_date, end_date)
     return warnings
 
@@ -223,8 +222,10 @@ async def send_warnings(user_id: int, start_date: str, end_date: str = None, db:
 
 @router.get("/hotspot-warnings")
 async def check_hotspot_warnings(location: str):
-    events = await nasa_client.fetch_nasa_events()
-    hotspots = calculate_hotspots(events, grid_size=1.0)
+    result = await nasa_client.fetch_nasa_events()
+    if isinstance(result, Err):
+        raise HTTPException(502, f"Failed to fetch disasters: {result.error}")
+    hotspots = calculate_hotspots(result.value, grid_size=1.0)
 
     geolocator = Nominatim(user_agent="disaster_tracker")
     geo = geolocator.geocode(location)
@@ -232,13 +233,13 @@ async def check_hotspot_warnings(location: str):
     if not geo:
         raise HTTPException(400, "Location not found")
 
-    user_point = (geo.latitude, geo.longitude)
+    user_loc = Coord(lat=geo.latitude, lon=geo.longitude)
 
     nearby = next(
         (
-            {"hotspot": h, "distance_km": round(calculate_distance(user_point, (h["lat"], h["lon"])), 2)}
+            {"hotspot": h.to_dict(), "distance_km": round(calculate_distance(user_loc, h.coord), 2)}
             for h in hotspots[:20]
-            if calculate_distance(user_point, (h["lat"], h["lon"])) < 200
+            if calculate_distance(user_loc, h.coord) < 200
         ),
         None,
     )
@@ -246,7 +247,7 @@ async def check_hotspot_warnings(location: str):
     if nearby:
         return {
             "warning": True,
-            "message": f"⚠️ УВАГА! {location} знаходиться в небезпечній зоні!",
+            "message": f"УВАГА! {location} знаходиться в небезпечній зоні!",
             "hotspot": nearby["hotspot"],
             "distance_km": nearby["distance_km"],
             "recommendation": "Це місце може бути небезпечним. Розгляньте інший напрямок подорожі.",
@@ -254,6 +255,6 @@ async def check_hotspot_warnings(location: str):
 
     return {
         "warning": False,
-        "message": f"✅ {location} виглядає безпечно",
+        "message": f"{location} виглядає безпечно",
         "recommendation": "Приємної подорожі!",
     }
