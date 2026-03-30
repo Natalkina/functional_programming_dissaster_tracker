@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.fp_core import Result, Ok, Err
+from app.core.fp_core import Result, Ok, Err
 
 # ---------------------------------------------------------------------------
 # Storage  (single mutable boundary — isolated here)

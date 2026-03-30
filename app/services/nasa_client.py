@@ -3,8 +3,8 @@ import httpx
 from typing import List, Dict, Any, Optional
 from functools import reduce
 from app.core.config import settings
-from app.services.fp_core import Ok, Err, Result
-from app.services.domain import DisasterEvent
+from app.core.fp_core import Ok, Err, Result
+from app.core.domain import DisasterEvent
 
 logger = logging.getLogger(__name__)
 

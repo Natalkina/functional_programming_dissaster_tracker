@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import CalendarEvent
 from app.services.calendar_service import get_disaster_warnings_for_events
-from app.services.domain import Coord
-from app.services.functional_streams import calculate_hotspots, calculate_distance
+from app.core.domain import Coord
+from app.core.functional_streams import calculate_hotspots, calculate_distance
 from app.services import nasa_client
 from geopy.geocoders import Nominatim
 
@@ -29,7 +29,7 @@ from app.repositories.token_repo import (
     save_user_tokens,
     get_user_tokens,
 )
-from app.services.fp_core import Ok, Err
+from app.core.fp_core import Ok, Err
 import httpx
 from fastapi.responses import RedirectResponse
 

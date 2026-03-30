@@ -3,9 +3,9 @@ from typing import Optional, Tuple
 from geopy.geocoders import Nominatim
 
 from app.services import nasa_client
-from app.services.fp_core import Ok, Err
-from app.services.domain import Coord, DisasterEvent
-from app.services.functional_streams import enrich_distance, enrich_warning
+from app.core.fp_core import Ok, Err
+from app.core.domain import Coord, DisasterEvent
+from app.core.functional_streams import enrich_distance, enrich_warning
 
 
 # pure: check if event falls within date range

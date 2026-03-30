@@ -4,9 +4,9 @@ from functools import partial
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services import nasa_client
-from app.services.fp_core import Ok, Err
-from app.services.domain import Coord
-from app.services.functional_streams import (
+from app.core.fp_core import Ok, Err
+from app.core.domain import Coord
+from app.core.functional_streams import (
     process_disaster_stream,
     calculate_hotspots,
     enrich_hotspot_city,

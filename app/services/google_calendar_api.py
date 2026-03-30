@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Awaitable
 
-from app.services.fp_core import Result, Ok, Err
-from app.services.domain import CalendarEvent
+from app.core.fp_core import Result, Ok, Err
+from app.core.domain import CalendarEvent
 
 GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 DEFAULT_CALENDAR_ID = "primary"

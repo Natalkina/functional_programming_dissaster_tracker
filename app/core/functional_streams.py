@@ -5,7 +5,7 @@ from itertools import chain
 from collections import Counter
 from typing import List, Tuple
 
-from app.services.domain import Coord, DisasterEvent, ProximityEvent, Hotspot
+from app.core.domain import Coord, DisasterEvent, ProximityEvent, Hotspot
 
 logger = logging.getLogger(__name__)
 
