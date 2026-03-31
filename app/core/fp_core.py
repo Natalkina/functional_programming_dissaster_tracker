@@ -5,6 +5,13 @@ instead of try/except, functions return Ok(value) or Err(reason).
 callers compose results via map/flat_map, avoiding manual isinstance
 branching at every call site.
 
+we need 4 methods for referential transparency ala:
+    Ok(foo)
+    .flat_map(parse)
+    .map(lambda: ...)
+    .map_err(lambda e: ...)
+    .unwrap_or((0)
+
     Ok[T]           — success wrapper
     Err[E]          — failure wrapper
     Result[T, E]    — tagged union (discriminated by match/case)
@@ -13,7 +20,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar, Union
-
 
 # we should NOT use Any, coz we'll lose parametric polymorphism entirely; I.e.
 # the type checker will not help us 
@@ -40,10 +46,10 @@ class Ok(Generic[T]):
     def flat_map(self, f: Callable[[T], Result]) -> Result:
         return f(self.value)
 
+    # in our code errors are str | object, so we can translate without touching success path
     def map_err(self, _f: Callable) -> Ok[T]:
         return self
 
-    # extract value or fall back to default
     def unwrap_or(self, _default: U) -> T:
         return self.value
 

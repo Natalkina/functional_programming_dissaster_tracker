@@ -13,6 +13,7 @@ for any of the dataclass docstring;
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 from types import MappingProxyType
 from typing import Optional, Tuple
 
@@ -137,3 +138,14 @@ class CalendarEvent:
             "status": self.status,
             "html_link": self.html_link,
         }
+
+
+# auth responses — NamedTuples are naturally immutable and unpackable
+class RegisterResponse(NamedTuple):
+    message: str
+    user_id: int
+
+class LoginResponse(NamedTuple):
+    message: str
+    email: str
+    user_id: int

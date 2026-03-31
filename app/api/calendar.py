@@ -62,6 +62,7 @@ async def google_oauth_login(user_id: str = Query("anonymous")):
         scopes=scopes,
     )
     return RedirectResponse(url)
+
 @router.get("/google/oauth/callback")
 async def google_oauth_callback(code: str = Query(...), state: str = Query(...)):
     """
