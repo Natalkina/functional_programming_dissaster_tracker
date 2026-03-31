@@ -1,8 +1,11 @@
+import json
 import logging
 import reverse_geocode
 from functools import partial
+from typing import AsyncGenerator
+from aiostream import stream
 from fastapi import APIRouter, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.services import nasa_client
 from app.core.fp_core import Err
@@ -18,46 +21,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/disasters", tags=["disasters"])
 
 
-# serialize event list — called at response boundary
-def make_events_response(xs) -> JSONResponse:
-    return JSONResponse(content={"events": [e.to_dict() for e in xs], "count": len(xs)})
+
+# io boundary: drain aiostream pipeline into ndjson — one item yielded at a time
+async def _ndjson_stream(pipeline) -> AsyncGenerator[str, None]:
+    async with pipeline.stream() as s:
+        async for e in s:
+            yield json.dumps(e.to_dict()) + "\n"
 
 
-# TODO: add memoization and lazy evaluation (return by batches of 10 maybe?)
 @router.get("/events")
-def get_all_disasters() -> JSONResponse:
+def get_all_disasters() -> StreamingResponse:
     result = nasa_client.fetch_nasa_events()
     if isinstance(result, Err):
         logger.error("fetch disasters failed: %s", result.error)
         return JSONResponse(status_code=502, content={"detail": result.error})
-    return make_events_response(result.value)
+    # stream.iterate wraps the fetched list into a lazy pipeline; _ndjson_stream owns execution
+    return StreamingResponse(_ndjson_stream(stream.iterate(result.value)), media_type="application/x-ndjson")
 
 
 @router.get("/events/by-date", description="Dates must be in ISO format, e.g. 2026-04-01. end_date is optional.")
 def get_disasters_by_date(
     start_date: str = Query(..., description="ISO date, e.g. 2026-04-01"),
     end_date: str = Query(None, description="ISO date, e.g. 2026-05-01"),
-) -> JSONResponse:
+) -> StreamingResponse:
     result = nasa_client.fetch_nasa_events(start_date=start_date, end_date=end_date)
     if isinstance(result, Err):
         logger.error("fetch by date failed: %s", result.error)
         return JSONResponse(status_code=502, content={"detail": result.error})
-    return make_events_response(result.value)
+    return StreamingResponse(_ndjson_stream(stream.iterate(result.value)), media_type="application/x-ndjson")
 
 
 @router.get("/events/by-location")
-async def get_disasters_near_location(
+def get_disasters_near_location(
     lat: float = Query(...),
     lon: float = Query(...),
     radius_km: float = Query(100),
-) -> JSONResponse:
-    result = nasa_client.fetch_nasa_events()  # sync; no await
+) -> StreamingResponse:
+    result = nasa_client.fetch_nasa_events()
     if isinstance(result, Err):
         logger.error("fetch for location filter failed: %s", result.error)
         return JSONResponse(status_code=502, content={"detail": result.error})
-    # aiostream pipeline: enrich + filter by proximity (intentionally async per project rules)
-    nearby = await process_disaster_stream(result.value, user_loc=Coord(lat=lat, lon=lon), radius_km=radius_km)
-    return make_events_response(nearby)
+    # process_disaster_stream is pure; _ndjson_stream owns async execution boundary
+    pipeline = process_disaster_stream(result.value, user_loc=Coord(lat=lat, lon=lon), radius_km=radius_km)
+    return StreamingResponse(_ndjson_stream(pipeline), media_type="application/x-ndjson")
 
 
 @router.get("/hotspots")

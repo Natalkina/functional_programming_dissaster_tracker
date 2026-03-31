@@ -74,25 +74,20 @@ def enrich_hotspot_city(h: Hotspot, geocode_fn) -> Hotspot:
     return Hotspot(coord=h.coord, count=h.count, city=city, country=country)
 
 
-async def process_disaster_stream(
+# pure: builds lazy aiostream pipeline — no IO, no await; evaluation deferred to caller
+# returns an aiostream Streamer[ProximityEvent] consumed via `async with pipeline.stream()`
+def process_disaster_stream(
     xs: List[DisasterEvent],
     user_loc: Coord,
     radius_km: float = 100,
-) -> Tuple[ProximityEvent, ...]:
-    """
-    async because aiostream pipeline terminators (stream.list) return coroutines — must be awaited.
-    other functions are sync pure transforms; this one owns the aiostream execution boundary.
-    pipeline: enrich events with distance/warning, keep only those within radius
-    """
+):
     s = stream.iterate(xs)
     enriched = stream.map(s, lambda e: enrich_distance(e, user_loc))
     with_warning = stream.map(enriched, enrich_warning)
-    filtered = stream.filter(
+    return stream.filter(
         with_warning,
         lambda pe: pe.distance_km is not None and pe.distance_km <= radius_km
     )
-    # stream.list materializes the aiostream pipeline into a list; wrap in tuple for immutability
-    return tuple(await stream.list(filtered))
 
 # aggregate all event coordinates into grid cells, count per cell
 def calculate_hotspots(xs: List[DisasterEvent], grid_size: float = 1.0) -> Tuple[Hotspot, ...]:
