@@ -26,24 +26,26 @@ def extract_events(data: Dict[str, Any]) -> List[DisasterEvent]:
 
 
 # io boundary: fetch raw json, convert http errors to Err
-async def get_raw_data(client: httpx.AsyncClient, url: str) -> Result:
+def get_raw_data(client: httpx.Client, url: str) -> Result:
     try:
-        response = await client.get(url)
-        response.raise_for_status()
-        return Ok(response.json())
+        resp = client.get(url)
     except Exception as exc:
         logger.error("nasa eonet fetch failed: %s", exc)
         return Err(str(exc))
+    if not resp.is_success:
+        logger.error("nasa eonet fetch failed: HTTP %s", resp.status_code)
+        return Err(f"HTTP {resp.status_code}")
+    return Ok(resp.json())
 
 
 # io boundary: compose url → fetch → extract, threading Result via map
-async def fetch_nasa_events(
+def fetch_nasa_events(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> Result:
     url = build_eonet_url(base_url or settings.NASA_EONET_API, start_date, end_date)
-    async with httpx.AsyncClient(timeout=15) as client:
-        result = await get_raw_data(client, url)
+    with httpx.Client(timeout=15) as client:
+        result = get_raw_data(client, url)
     # map lifts extract_events over Ok, passes Err through unchanged
     return result.map(extract_events)

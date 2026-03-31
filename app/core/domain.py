@@ -140,6 +140,27 @@ class CalendarEvent:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class DisasterWarning:
+    """proximity alert pairing a user calendar event with a nearby disaster"""
+    event_title: str
+    event_location: str
+    event_date: str
+    disaster_type: str
+    distance_km: float
+    warning_level: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "event_title": self.event_title,
+            "event_location": self.event_location,
+            "event_date": self.event_date,
+            "disaster_type": self.disaster_type,
+            "distance_km": self.distance_km,
+            "warning_level": self.warning_level,
+        }
+
+
 # auth responses — NamedTuples are naturally immutable and unpackable
 class RegisterResponse(NamedTuple):
     message: str

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable
 
 from app.core.fp_core import Result, Ok, Err
 from app.core.domain import CalendarEvent
@@ -8,16 +8,16 @@ from app.core.domain import CalendarEvent
 GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 DEFAULT_CALENDAR_ID = "primary"
 
-async def fetch_calendar_events_raw(
-    http_get: Callable[[str, dict[str, str]], Awaitable[dict]],
+def fetch_calendar_events_raw(
+    http_get: Callable[[str, dict[str, str]], Result],
     access_token: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
     time_min_iso: str | None = None,
     time_max_iso: str | None = None,
     sync_token: str | None = None,
     max_results: int = 250,
-) -> Result[dict[str, Any], str]:
-    """io boundary: fetch raw calendar body, returns Result"""
+) -> Result:
+    """io boundary: fetch raw calendar body; delegates error handling to http_get Result"""
     url = f"{GOOGLE_CALENDAR_API}/calendars/{calendar_id}/events"
 
     params: tuple[str, ...] = (
@@ -36,12 +36,7 @@ async def fetch_calendar_events_raw(
 
     full_url = f"{url}?{'&'.join(params)}"
     headers = {"Authorization": f"Bearer {access_token}"}
-
-    try:
-        body = await http_get(full_url, headers)
-        return Ok(body)
-    except Exception as exc:
-        return Err(f"Google Calendar fetch failed: {exc}")
+    return http_get(full_url, headers)
 
 
 # ---------------------------------------------------------------------------
