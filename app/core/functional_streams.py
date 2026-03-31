@@ -73,7 +73,7 @@ def enrich_hotspot_city(h: Hotspot, geocode_fn) -> Hotspot:
     return Hotspot(coord=h.coord, count=h.count, city=city, country=country)
 
 
-# aiostream was removed here intentionally:
+# aiostream was removed:
 # 1. enrich_distance and enrich_warning are pure sync functions — no concurrent io to interleave,
 #    so the async pipeline stages add overhead with zero benefit.
 # 2. the only lazy delivery mechanism that would justify async (StreamingResponse) breaks the

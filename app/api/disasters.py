@@ -23,7 +23,6 @@ def make_events_response(xs) -> JSONResponse:
     return JSONResponse(content={"events": [e.to_dict() for e in xs], "count": len(xs)})
 
 
-# TODO: add memoization and lazy evaluation (return by batches of 10 maybe?)
 @router.get("/events")
 def get_all_disasters() -> JSONResponse:
     result = nasa_client.fetch_nasa_events()

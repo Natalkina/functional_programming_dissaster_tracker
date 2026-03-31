@@ -6,14 +6,21 @@ import hashlib
 import hmac
 import secrets
 import time
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlencode
 from app.core.fp_core import Ok, Err, Result
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-# TODO; these 3 functions are working with fully mutable data types, why is it so? 
+
+class OAuthState(NamedTuple):
+    ok: bool
+    user_id: str | None
+    issued_at: int | None
+    reason: str | None
+
+# pure: bytes and str are immutable in Python — no mutable data escapes these functions
 def _b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -27,7 +34,9 @@ def _sign(payload: str, secret: str) -> str:
     digest = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).digest()
     return _b64url_encode(digest)
 
-# TODO: same, works only with mutable data types - rework
+# impure by design: secrets.token_urlsafe is non-deterministic, time.time() reads the clock.
+# now_ts is injectable so the function is fully testable without real time dependency.
+# all intermediate values (str, int) are immutable — no mutable data escapes.
 def make_oauth_state(user_id: str, secret: str, now_ts: int | None = None) -> str:
     """
     Create signed OAuth2 state: base64url("user_id:iat:nonce.sig")
@@ -38,22 +47,15 @@ def make_oauth_state(user_id: str, secret: str, now_ts: int | None = None) -> st
     signature = _sign(payload, secret)
     return _b64url_encode(f"{payload}.{signature}".encode("utf-8"))
 
-#TODO: only mutable data types here too. Change or say why we can't change it 
+# impure: reads the clock when now_ts is None; now_ts is injectable for testing.
+# bare except is intentional — state is untrusted external input; any decode/split/int
+# failure means malformed state, which maps cleanly to invalid_format.
 def validate_oauth_state(
     state: str,
     secret: str,
     max_age_seconds: int = 900,
     now_ts: int | None = None,
-) -> dict[str, Any]:
-    """
-    Returns parsed state payload if valid:
-    {
-      "ok": bool,
-      "user_id": str | None,
-      "issued_at": int | None,
-      "reason": str | None
-    }
-    """
+) -> OAuthState:
     now_value = now_ts if now_ts is not None else int(time.time())
 
     try:
@@ -62,24 +64,25 @@ def validate_oauth_state(
         expected_sig = _sign(payload, secret)
 
         if not hmac.compare_digest(given_sig, expected_sig):
-            return {"ok": False, "user_id": None, "issued_at": None, "reason": "bad_signature"}
+            return OAuthState(ok=False, user_id=None, issued_at=None, reason="bad_signature")
 
         user_id, issued_at_raw, _nonce = payload.split(":", 2)
         issued_at = int(issued_at_raw)
 
         if (now_value - issued_at) > max_age_seconds:
-            return {"ok": False, "user_id": user_id, "issued_at": issued_at, "reason": "expired"}
+            return OAuthState(ok=False, user_id=user_id, issued_at=issued_at, reason="expired")
 
-        return {"ok": True, "user_id": user_id, "issued_at": issued_at, "reason": None}
+        return OAuthState(ok=True, user_id=user_id, issued_at=issued_at, reason=None)
     except Exception:
-        return {"ok": False, "user_id": None, "issued_at": None, "reason": "invalid_format"}
+        return OAuthState(ok=False, user_id=None, issued_at=None, reason="invalid_format")
 
-# TODO: mutable data types 
+# pure: all inputs are immutable (str, tuple, bool); params dict is local and consumed
+# immediately by urlencode — it never escapes the function scope.
 def build_google_oauth_url(
     client_id: str,
     redirect_uri: str,
     state: str,
-    scopes: list[str],
+    scopes: tuple[str, ...],
     access_type: str = "offline",
     prompt: str = "consent",
     include_granted_scopes: bool = True,
@@ -97,6 +100,8 @@ def build_google_oauth_url(
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
 
+# io boundary: payload dict is local and consumed immediately by http_post_form as form data.
+# flat_map: post → normalize; Err short-circuits both steps.
 def exchange_code_for_tokens(
     http_post_form,  # callable(url: str, data: dict[str, str]) -> Result
     code: str,
@@ -112,10 +117,13 @@ def exchange_code_for_tokens(
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
     }
-    # flat_map: post → normalize; Err short-circuits both steps
     return http_post_form(token_url, payload).flat_map(normalize_token_response)
 
 
+# io boundary: payload dict is local and consumed immediately by http_post_form as form data.
+# monadic chain: post → normalize → patch refresh_token; Err short-circuits all steps.
+# {**n, ...} creates a new dict per call — it does not mutate n; the result is wrapped in Ok.
+# Google sometimes omits refresh_token in the response; preserve caller's original via map.
 def refresh_access_token(
     http_post_form,  # callable(url: str, data: dict[str, str]) -> Result
     refresh_token: str,
@@ -129,7 +137,6 @@ def refresh_access_token(
         "client_secret": client_secret,
         "grant_type": "refresh_token",
     }
-    # Google sometimes omits refresh_token; preserve caller's original via map
     return (
         http_post_form(token_url, payload)
         .flat_map(normalize_token_response)
@@ -138,7 +145,11 @@ def refresh_access_token(
 
 
 def normalize_token_response(token_data: dict[str, object], now_ts: int | None = None) -> Result:
-    """pure: validate and normalize OAuth token response dict into Result"""
+    """
+    impure: reads the clock when now_ts is None; now_ts is injectable for testing.
+    returns Ok(dict) — the dict is mutable, but token_repo is the only writer and
+    it serialises to json immediately, so the value never escapes as a shared reference.
+    """
     if "error" in token_data:
         return Err(f"OAuth token error: {token_data.get('error')}")
 
@@ -159,6 +170,8 @@ def normalize_token_response(token_data: dict[str, object], now_ts: int | None =
     })
 
 
+# also reads the clock when now_ts is None; now_ts is injectable for testing.
+# token dict is read-only here — no mutation.
 def is_access_token_expired(token: dict[str, Any], skew_seconds: int = 30, now_ts: int | None = None) -> bool:
     now_value = now_ts if now_ts is not None else int(time.time())
     obtained_at = int(token.get("obtained_at", 0))

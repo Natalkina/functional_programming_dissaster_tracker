@@ -54,6 +54,9 @@ def _http_get_json(url: str, headers: dict[str, str]) -> Ok | Err:
 # SQLAlchemy .all() returns a mutable list — converted to tuple here so
 # downstream pure functions receive an immutable sequence.
 def _fetch_user_events(db: Session, user_id: int) -> tuple[dict, ...]:
+    """
+    the memoization was not added intentionally; User events can change quickly
+    """
     return tuple(
         {"title": e.title, "location": e.location, "date": e.date}
         for e in db.query(CalendarEvent).filter(CalendarEvent.user_id == user_id).all()
@@ -85,10 +88,10 @@ def google_oauth_callback(code: str = Query(...), state: str = Query(...)):
     """
     # 1. Validate state (CSRF)
     validation = validate_oauth_state(state, settings.OAUTH_STATE_SECRET)
-    if not validation["ok"]:
-        return JSONResponse(status_code=400, content={"detail": f"Invalid OAuth state: {validation['reason']}"})
+    if not validation.ok:
+        return JSONResponse(status_code=400, content={"detail": f"Invalid OAuth state: {validation.reason}"})
 
-    user_id = validation["user_id"]
+    user_id = validation.user_id
 
     # 2. Exchange code for tokens (IO boundary).
     # flat_map chain inside exchange_code_for_tokens: post → normalize; Err propagates.

@@ -27,6 +27,8 @@ app.include_router(auth.router)
 app.include_router(disasters.router)
 app.include_router(calendar.router)
 
+
+# im just too lazy to rewrite this into functional style
 @app.get("/")
 async def root():
     index_path = os.path.join(static_path, "index.html")
