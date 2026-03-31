@@ -63,6 +63,7 @@ def find_user_by_email(db: Session, email: str) -> Result:
 def create_user(db: Session, email: str, hashed_pw: str) -> Result:
     """
     IMPURE: insert a new user row, rolls back and returns Err on db failure
+    try/except is acceptable in this situation;
     """
     try:
         new_user = User(email=email, password=hashed_pw)
