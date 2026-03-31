@@ -9,6 +9,7 @@ from app.core.domain import DisasterEvent
 logger = logging.getLogger(__name__)
 
 
+# TODO: returns str. Explain why it's would be a pain-in-the-ass to change this
 # declarative url builder — accumulates only non-None params via reduce
 def build_eonet_url(base_url: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
     params = reduce(
@@ -19,7 +20,7 @@ def build_eonet_url(base_url: str, start_date: Optional[str] = None, end_date: O
     query = "&".join(f"{k}={v}" for k, v in params.items())
     return f"{base_url}?{query}" if query else base_url
 
-
+# TODO: why we return list? it's a mutable data type. Also explain (add comments) the mutable data type inside the function itself. Or change it to the immutable if applicable;
 # wrap raw dicts in opaque domain type, freezing each on entry
 def extract_events(data: Dict[str, Any]) -> List[DisasterEvent]:
     return [DisasterEvent.from_dict(e) for e in data.get("events", [])]

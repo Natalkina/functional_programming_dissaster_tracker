@@ -17,7 +17,7 @@ def fetch_calendar_events_raw(
     sync_token: str | None = None,
     max_results: int = 250,
 ) -> Result:
-    """io boundary: fetch raw calendar body; delegates error handling to http_get Result"""
+    """io: fetch raw calendar body; delegates error handling to http_get Result"""
     url = f"{GOOGLE_CALENDAR_API}/calendars/{calendar_id}/events"
 
     params: tuple[str, ...] = (
@@ -36,6 +36,7 @@ def fetch_calendar_events_raw(
 
     full_url = f"{url}?{'&'.join(params)}"
     headers = {"Authorization": f"Bearer {access_token}"}
+
     return http_get(full_url, headers)
 
 
@@ -43,8 +44,9 @@ def fetch_calendar_events_raw(
 # Pure  —  normalize a single raw Google event into CalendarEvent
 # ---------------------------------------------------------------------------
 
+# TODO: Why we say that it's pure, when we are working with a mutable dict inside the local scope? change or add explanatory comments 
 def normalize_google_event(raw: dict[str, Any]) -> CalendarEvent:
-    """pure: raw google event dict -> typed CalendarEvent"""
+    """raw google event dict -> typed CalendarEvent"""
     start_block = raw.get("start", {})
     end_block = raw.get("end", {})
     return CalendarEvent(
@@ -63,8 +65,8 @@ def normalize_google_event(raw: dict[str, Any]) -> CalendarEvent:
 # Pure  —  normalize a sequence of raw events (functor over tuple)
 # ---------------------------------------------------------------------------
 
+# TODO: add comments on why this is pure? we have tuple of dicts inside
 def normalize_google_events(raw_events: tuple[dict[str, Any], ...]) -> tuple[CalendarEvent, ...]:
-    """pure: map normalize_google_event over a sequence"""
     return tuple(map(normalize_google_event, raw_events))
 
 
@@ -72,10 +74,10 @@ def normalize_google_events(raw_events: tuple[dict[str, Any], ...]) -> tuple[Cal
 # Pure  —  extract items + next sync token from raw body
 # ---------------------------------------------------------------------------
 
+# TODO: why is it called pure if it's `body` variable is a dict? (mutable)
 def extract_items_and_sync_token(
     body: dict[str, Any],
 ) -> tuple[tuple[dict[str, Any], ...], str | None]:
-    """pure: extract (items, nextSyncToken) from raw google response"""
     return tuple(body.get("items", [])), body.get("nextSyncToken")
 
 
@@ -84,7 +86,6 @@ def extract_items_and_sync_token(
 # ---------------------------------------------------------------------------
 
 def keep_events_with_location(xs: tuple[CalendarEvent, ...]) -> tuple[CalendarEvent, ...]:
-    """pure: drop events without a location"""
     return tuple(filter(lambda e: bool(e.location), xs))
 
 
@@ -97,7 +98,6 @@ def filter_events_by_date(
     start_date: str,
     end_date: str | None = None,
 ) -> tuple[CalendarEvent, ...]:
-    """pure: keep events whose start_date falls within [start_date, end_date]"""
     effective_end = end_date or start_date
     return tuple(filter(
         lambda e: start_date <= e.start_date[:10] <= effective_end,
@@ -110,7 +110,6 @@ def filter_events_by_date(
 # ---------------------------------------------------------------------------
 
 def process_calendar_body(body: dict[str, Any]) -> tuple[CalendarEvent, ...]:
-    """pure pipeline: extract items -> normalize -> keep with location"""
     items, _ = extract_items_and_sync_token(body)
     return keep_events_with_location(normalize_google_events(items))
 

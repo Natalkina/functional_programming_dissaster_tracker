@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import CalendarEvent
 from app.services.calendar_service import get_disaster_warnings_for_events
-from app.core.domain import Coord, DisasterWarning
+from app.core.domain import Coord
 from app.core.functional_streams import calculate_hotspots, calculate_distance
 from app.services import nasa_client
 from geopy.geocoders import Nominatim
@@ -163,7 +163,7 @@ def get_google_calendar_events(
 
     # 4. Pure pipeline: raw body → normalized CalendarEvents with location
     events = process_calendar_body(raw_result.value)
-    return {"events": [e.to_dict() for e in events], "count": len(events), "user_id": user_id}
+    return JSONResponse(content={"events": [e.to_dict() for e in events], "count": len(events), "user_id": user_id})
 
 
 @router.get("/google/status")
@@ -171,7 +171,7 @@ def google_auth_status(user_id: str = Query("anonymous")):
     """Check whether a user has connected Google Calendar."""
     token_result = get_user_tokens(user_id)
     connected = isinstance(token_result, Ok)
-    return {"connected": connected, "user_id": user_id}
+    return JSONResponse(content={"connected": connected, "user_id": user_id})
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +183,7 @@ class CalendarEventCreate:
 
 
 @router.post("/events")
-def add_event(event: CalendarEventCreate, db: Session = Depends(get_db)) -> dict[str, object]:
+def add_event(event: CalendarEventCreate, db: Session = Depends(get_db)) -> JSONResponse:
     new_event = CalendarEvent(
         user_id=event.user_id,
         title=event.title,
@@ -193,31 +193,32 @@ def add_event(event: CalendarEventCreate, db: Session = Depends(get_db)) -> dict
     db.add(new_event)
     db.commit()
     db.refresh(new_event)
-    return {"message": "Event added", "event_id": new_event.id}
+    return JSONResponse(content={"message": "Event added", "event_id": new_event.id})
 
 
 # db.query(...).all() returns a mutable list of ORM objects; immediately
 # projected to immutable plain dicts at this io boundary — no further change needed.
 @router.get("/events")
-def get_events(user_id: int = Query(...), date: str = Query(None), db: Session = Depends(get_db)) -> dict[str, object]:
+def get_events(user_id: int = Query(...), date: str = Query(None), db: Session = Depends(get_db)) -> JSONResponse:
     query = db.query(CalendarEvent).filter(CalendarEvent.user_id == user_id)
     if date:
         query = query.filter(CalendarEvent.date == date)
     events = query.all()
-    return {"events": tuple({"id": e.id, "title": e.title, "location": e.location, "date": e.date} for e in events), "count": len(events)}
+    return JSONResponse(content={"events": [{"id": e.id, "title": e.title, "location": e.location, "date": e.date} for e in events], "count": len(events)})
 
 
-@router.get("/check-disasters", response_model=list[DisasterWarning])
-def check_disasters_for_events(user_id: int, start_date: str, end_date: str = None, db: Session = Depends(get_db)):
-    return get_disaster_warnings_for_events(_fetch_user_events(db, user_id), start_date, end_date)
+@router.get("/check-disasters")
+def check_disasters_for_events(user_id: int, start_date: str, end_date: str = None, db: Session = Depends(get_db)) -> JSONResponse:
+    warnings = get_disaster_warnings_for_events(_fetch_user_events(db, user_id), start_date, end_date)
+    return JSONResponse(content=[w.to_dict() for w in warnings])
 
 
 @router.post("/notify-warnings")
-def send_warnings(user_id: int, start_date: str, end_date: str = None, db: Session = Depends(get_db)) -> dict[str, object]:
+def send_warnings(user_id: int, start_date: str, end_date: str = None, db: Session = Depends(get_db)) -> JSONResponse:
     warnings = get_disaster_warnings_for_events(_fetch_user_events(db, user_id), start_date, end_date)
 
     if not warnings:
-        return {"message": "Безпечно! Катастроф не знайдено", "warnings": []}
+        return JSONResponse(content={"message": "Безпечно! Катастроф не знайдено", "warnings": []})
 
     count_by_level = reduce(
         lambda acc, w: {**acc, w.warning_level: acc.get(w.warning_level, 0) + 1},
@@ -225,12 +226,12 @@ def send_warnings(user_id: int, start_date: str, end_date: str = None, db: Sessi
         {}
     )
 
-    return {
+    return JSONResponse(content={
         "message": f"УВАГА! Знайдено {len(warnings)} попереджень",
         "high_risk": count_by_level.get("HIGH", 0),
         "medium_risk": count_by_level.get("MEDIUM", 0),
         "warnings": [w.to_dict() for w in warnings],
-    }
+    })
 
 @router.get("/hotspot-warnings")
 def check_hotspot_warnings(location: str):
@@ -246,24 +247,26 @@ def check_hotspot_warnings(location: str):
 
     user_loc = Coord(lat=geo.latitude, lon=geo.longitude)
 
-    # compute distance once per hotspot via lazy generator; next() short-circuits
+    # calculate_distance returns Result; unwrap Ok, skip Err (bad coords)
     candidates = (
-        {"hotspot": h.to_dict(), "distance_km": round(calculate_distance(user_loc, h.coord), 2)}
+        {"hotspot": h.to_dict(), "distance_km": round(r.value, 2)}
         for h in hotspots[:20]
+        for r in (calculate_distance(user_loc, h.coord),)
+        if isinstance(r, Ok)
     )
     nearby = next((c for c in candidates if c["distance_km"] < 200), None)
 
     if nearby:
-        return {
+        return JSONResponse(content={
             "warning": True,
             "message": f"УВАГА! {location} знаходиться в небезпечній зоні!",
             "hotspot": nearby["hotspot"],
             "distance_km": nearby["distance_km"],
             "recommendation": "Це місце може бути небезпечним. Розгляньте інший напрямок подорожі.",
-        }
+        })
 
-    return {
+    return JSONResponse(content={
         "warning": False,
         "message": f"{location} виглядає безпечно",
         "recommendation": "Приємної подорожі!",
-    }
+    })

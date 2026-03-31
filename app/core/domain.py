@@ -160,8 +160,8 @@ class DisasterWarning:
             "warning_level": self.warning_level,
         }
 
-
-# auth responses — NamedTuples are naturally immutable and unpackable
+# it is prefferable to use dataclass, at least just for pattern
+# but i was curios how these work
 class RegisterResponse(NamedTuple):
     message: str
     user_id: int

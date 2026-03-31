@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import base64
 import hashlib
 import hmac
@@ -12,7 +13,7 @@ from app.core.fp_core import Ok, Err, Result
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-
+# TODO; these 3 functions are working with fully mutable data types, why is it so? 
 def _b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -26,7 +27,7 @@ def _sign(payload: str, secret: str) -> str:
     digest = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).digest()
     return _b64url_encode(digest)
 
-
+# TODO: same, works only with mutable data types - rework
 def make_oauth_state(user_id: str, secret: str, now_ts: int | None = None) -> str:
     """
     Create signed OAuth2 state: base64url("user_id:iat:nonce.sig")
@@ -37,7 +38,7 @@ def make_oauth_state(user_id: str, secret: str, now_ts: int | None = None) -> st
     signature = _sign(payload, secret)
     return _b64url_encode(f"{payload}.{signature}".encode("utf-8"))
 
-
+#TODO: only mutable data types here too. Change or say why we can't change it 
 def validate_oauth_state(
     state: str,
     secret: str,
@@ -73,7 +74,7 @@ def validate_oauth_state(
     except Exception:
         return {"ok": False, "user_id": None, "issued_at": None, "reason": "invalid_format"}
 
-
+# TODO: mutable data types 
 def build_google_oauth_url(
     client_id: str,
     redirect_uri: str,
@@ -165,12 +166,8 @@ def is_access_token_expired(token: dict[str, Any], skew_seconds: int = 30, now_t
     return now_value >= (obtained_at + expires_in - skew_seconds)
 
 
-
-import httpx
-
-
 def post_form_httpx(url: str, data: dict[str, str]) -> Result:
-    """io boundary: POST form data, returns Result to avoid raising on http errors"""
+    """external effect: POST form data, returns Result to avoid raising on http errors"""
     try:
         with httpx.Client(timeout=15) as client:
             resp = client.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
