@@ -1,5 +1,4 @@
 import logging
-from aiostream import stream
 from geopy.distance import geodesic
 from itertools import chain
 from collections import Counter
@@ -74,25 +73,23 @@ def enrich_hotspot_city(h: Hotspot, geocode_fn) -> Hotspot:
     return Hotspot(coord=h.coord, count=h.count, city=city, country=country)
 
 
-async def process_disaster_stream(
+# aiostream was removed here intentionally:
+# 1. enrich_distance and enrich_warning are pure sync functions — no concurrent io to interleave,
+#    so the async pipeline stages add overhead with zero benefit.
+# 2. the only lazy delivery mechanism that would justify async (StreamingResponse) breaks the
+#    frontend — verified in practice. stream.list() was materializing everything eagerly anyway,
+#    making the async purely an artifact of the aiostream api, not real concurrency.
+# plain sync generator achieves identical behavior with less machinery.
+def process_disaster_stream(
     xs: List[DisasterEvent],
     user_loc: Coord,
     radius_km: float = 100,
 ) -> Tuple[ProximityEvent, ...]:
-    """
-    async because aiostream pipeline terminators (stream.list) return coroutines — must be awaited.
-    other functions are sync pure transforms; this one owns the aiostream execution boundary.
-    pipeline: enrich events with distance/warning, keep only those within radius
-    """
-    s = stream.iterate(xs)
-    enriched = stream.map(s, lambda e: enrich_distance(e, user_loc))
-    with_warning = stream.map(enriched, enrich_warning)
-    filtered = stream.filter(
-        with_warning,
-        lambda pe: pe.distance_km is not None and pe.distance_km <= radius_km
+    return tuple(
+        pe
+        for pe in (enrich_warning(enrich_distance(e, user_loc)) for e in xs)
+        if pe.distance_km is not None and pe.distance_km <= radius_km
     )
-    # stream.list materializes the aiostream pipeline into a list; wrap in tuple for immutability
-    return tuple(await stream.list(filtered))
 
 # aggregate all event coordinates into grid cells, count per cell
 def calculate_hotspots(xs: List[DisasterEvent], grid_size: float = 1.0) -> Tuple[Hotspot, ...]:

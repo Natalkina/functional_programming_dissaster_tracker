@@ -46,17 +46,16 @@ def get_disasters_by_date(
 
 
 @router.get("/events/by-location")
-async def get_disasters_near_location(
+def get_disasters_near_location(
     lat: float = Query(...),
     lon: float = Query(...),
     radius_km: float = Query(100),
 ) -> JSONResponse:
-    result = nasa_client.fetch_nasa_events()  # sync; no await
+    result = nasa_client.fetch_nasa_events()
     if isinstance(result, Err):
         logger.error("fetch for location filter failed: %s", result.error)
         return JSONResponse(status_code=502, content={"detail": result.error})
-    # aiostream pipeline: enrich + filter by proximity (intentionally async per project rules)
-    nearby = await process_disaster_stream(result.value, user_loc=Coord(lat=lat, lon=lon), radius_km=radius_km)
+    nearby = process_disaster_stream(result.value, user_loc=Coord(lat=lat, lon=lon), radius_km=radius_km)
     return make_events_response(nearby)
 
 
