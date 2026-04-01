@@ -21,3 +21,4 @@ build/
 .claude
 *.md
 uv.lock
+implementation_report/
