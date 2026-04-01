@@ -3,9 +3,9 @@ from typing import Optional, Tuple
 from geopy.geocoders import Nominatim
 
 from app.services import nasa_client
-from app.services.fp_core import Ok, Err
-from app.services.domain import Coord, DisasterEvent
-from app.services.functional_streams import enrich_distance, enrich_warning
+from app.core.fp_core import Err
+from app.core.domain import Coord, DisasterEvent, DisasterWarning
+from app.core.functional_streams import enrich_distance, enrich_warning
 
 
 # pure: check if event falls within date range
@@ -14,7 +14,7 @@ def is_event_in_range(event: dict, start: str, end: Optional[str]) -> bool:
 
 
 # pure: pair user event with disaster, compute proximity warning
-def build_warning(pair: Tuple[dict, DisasterEvent], radius_km: float) -> Optional[dict]:
+def build_warning(pair: Tuple[dict, DisasterEvent], radius_km: float) -> Optional[DisasterWarning]:
     user_event, disaster = pair
 
     if not user_event.get("coords"):
@@ -25,14 +25,14 @@ def build_warning(pair: Tuple[dict, DisasterEvent], radius_km: float) -> Optiona
     if pe.distance_km is None or pe.distance_km > radius_km:
         return None
 
-    return {
-        "event_title": user_event["title"],
-        "event_location": user_event["location"],
-        "event_date": user_event["date"],
-        "disaster_type": disaster.title or "Unknown",
-        "distance_km": pe.distance_km,
-        "warning_level": pe.warning_level,
-    }
+    return DisasterWarning(
+        event_title=user_event["title"],
+        event_location=user_event["location"],
+        event_date=user_event["date"],
+        disaster_type=disaster.title or "Unknown",
+        distance_km=pe.distance_km,
+        warning_level=pe.warning_level,
+    )
 
 
 # io boundary: forward geocoding (text → coords)
@@ -45,22 +45,21 @@ def geocode_event(event: dict, geolocator: Nominatim) -> dict:
     return {**event, "coords": coords}
 
 
-# pipeline
-async def get_disaster_warnings_for_events(
+# io boundary: fetch disasters → geocode events → compute proximity warnings
+def get_disaster_warnings_for_events(
     user_events: tuple[dict, ...],
     start_date: str,
     end_date: Optional[str] = None,
     radius_km: float = 100.0,
-) -> tuple[dict, ...]:
+) -> tuple[DisasterWarning, ...]:
     geolocator = Nominatim(user_agent="disaster_tracker")
-    result = await nasa_client.fetch_nasa_events(start_date, end_date)
-    match result:
-        case Err():
-            return []
-        case Ok(value=disasters):
-            pass
+    result = nasa_client.fetch_nasa_events(start_date, end_date)
+    if isinstance(result, Err):
+        return ()
+    disasters = result.value
 
-    valid_events = list(map(
+    # geocoding is an io side-effect; isolated here at the pipeline boundary
+    valid_events = tuple(map(
         lambda e: geocode_event(e, geolocator),
         filter(lambda e: is_event_in_range(e, start_date, end_date), user_events),
     ))

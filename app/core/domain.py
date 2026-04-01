@@ -13,6 +13,7 @@ for any of the dataclass docstring;
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 from types import MappingProxyType
 from typing import Optional, Tuple
 
@@ -137,3 +138,35 @@ class CalendarEvent:
             "status": self.status,
             "html_link": self.html_link,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DisasterWarning:
+    """proximity alert pairing a user calendar event with a nearby disaster"""
+    event_title: str
+    event_location: str
+    event_date: str
+    disaster_type: str
+    distance_km: float
+    warning_level: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "event_title": self.event_title,
+            "event_location": self.event_location,
+            "event_date": self.event_date,
+            "disaster_type": self.disaster_type,
+            "distance_km": self.distance_km,
+            "warning_level": self.warning_level,
+        }
+
+# it is prefferable to use dataclass, at least just for pattern
+# but i was curios how these work
+class RegisterResponse(NamedTuple):
+    message: str
+    user_id: int
+
+class LoginResponse(NamedTuple):
+    message: str
+    email: str
+    user_id: int
