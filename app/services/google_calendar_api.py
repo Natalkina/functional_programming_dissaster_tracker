@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.core.fp_core import Result, Ok, Err
+from app.core.fp_core import Result
 from app.core.domain import CalendarEvent
 
 GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
@@ -40,13 +40,10 @@ def fetch_calendar_events_raw(
     return http_get(full_url, headers)
 
 
-# ---------------------------------------------------------------------------
-# Pure  —  normalize a single raw Google event into CalendarEvent
-# ---------------------------------------------------------------------------
-
-# TODO: Why we say that it's pure, when we are working with a mutable dict inside the local scope? change or add explanatory comments 
+# pure: `raw` is a mutable dict but this function only reads it — never mutates it.
+# purity is about behavior (same input → same output, no side effects), not about
+# whether the parameter type is mutable. returns an immutable frozen CalendarEvent.
 def normalize_google_event(raw: dict[str, Any]) -> CalendarEvent:
-    """raw google event dict -> typed CalendarEvent"""
     start_block = raw.get("start", {})
     end_block = raw.get("end", {})
     return CalendarEvent(
@@ -61,38 +58,27 @@ def normalize_google_event(raw: dict[str, Any]) -> CalendarEvent:
     )
 
 
-# ---------------------------------------------------------------------------
-# Pure  —  normalize a sequence of raw events (functor over tuple)
-# ---------------------------------------------------------------------------
-
-# TODO: add comments on why this is pure? we have tuple of dicts inside
+# pure: functor map over a sequence — applies a pure function to each element.
+# the dicts inside the tuple are mutable, but normalize_google_event only reads them.
 def normalize_google_events(raw_events: tuple[dict[str, Any], ...]) -> tuple[CalendarEvent, ...]:
     return tuple(map(normalize_google_event, raw_events))
 
 
-# ---------------------------------------------------------------------------
-# Pure  —  extract items + next sync token from raw body
-# ---------------------------------------------------------------------------
-
-# TODO: why is it called pure if it's `body` variable is a dict? (mutable)
+# pure: body is a mutable dict but only read here, never mutated.
+# the returned inner dicts are references to the original api data —
+# they are immediately consumed by normalize_google_events which also only reads them.
 def extract_items_and_sync_token(
     body: dict[str, Any],
 ) -> tuple[tuple[dict[str, Any], ...], str | None]:
     return tuple(body.get("items", [])), body.get("nextSyncToken")
 
 
-# ---------------------------------------------------------------------------
-# Pure  —  filter events that have a location string
-# ---------------------------------------------------------------------------
-
+# pure: filter over immutable CalendarEvent sequence
 def keep_events_with_location(xs: tuple[CalendarEvent, ...]) -> tuple[CalendarEvent, ...]:
     return tuple(filter(lambda e: bool(e.location), xs))
 
 
-# ---------------------------------------------------------------------------
-# Pure  —  filter events by date range
-# ---------------------------------------------------------------------------
-
+# pure: filter by date range — string comparison is safe since ISO dates sort lexicographically
 def filter_events_by_date(
     xs: tuple[CalendarEvent, ...],
     start_date: str,
@@ -105,11 +91,7 @@ def filter_events_by_date(
     ))
 
 
-# ---------------------------------------------------------------------------
-# Composed pipeline  —  raw body -> normalized CalendarEvents with location
-# ---------------------------------------------------------------------------
-
+# composed pipeline: extract items → normalize → keep with location
 def process_calendar_body(body: dict[str, Any]) -> tuple[CalendarEvent, ...]:
     items, _ = extract_items_and_sync_token(body)
     return keep_events_with_location(normalize_google_events(items))
-

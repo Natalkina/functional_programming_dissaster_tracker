@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from geopy.geocoders import Nominatim
 
 from app.services import nasa_client
-from app.core.fp_core import Ok, Err
+from app.core.fp_core import Err
 from app.core.domain import Coord, DisasterEvent, DisasterWarning
 from app.core.functional_streams import enrich_distance, enrich_warning
 
